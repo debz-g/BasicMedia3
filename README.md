@@ -7,7 +7,7 @@ This app is to demonstrate basic Media3 implementation.
 - Background media playback.
 - Custom Notification Buttons to Rewind and Fast-Forward
 
-# Tech-Stuff
+# Documentation References
 - Uses the latest Media3 Jetpack Components for publishing this. [Basics](https://developer.android.com/media/implement/playback-app)
 - Uses MediaSessionService to handle background playback. [Background Playback](https://developer.android.com/media/media3/session/background-playback)
 - Uses MediaController to connect the app UI with the MediaSessiona and the ExoPlayer. [MediaController](https://developer.android.com/media/media3/session/connect-to-media-app)
