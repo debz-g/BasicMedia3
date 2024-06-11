@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.SeekBar
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.media3.common.MediaItem
@@ -42,10 +43,12 @@ class MediaActivity : AppCompatActivity() {
     var seekForward = 5000
     var seekBackward = 5000
 
-    private var totalSeekTime: Int = 0
-    private var currentSeekTime: Int = 0
-    private var seekStartTime: Int = 0
-    private var seekEndTime: Int = 0
+
+    private var listeningTime = 0  // in seconds
+    private var pauseCount = 0   //in seconds
+    private var isListening = true
+    private lateinit var timerHandler: Handler
+    private lateinit var timerRunnable: Runnable
 
     override fun onStart() {
         super.onStart()
@@ -80,24 +83,26 @@ class MediaActivity : AppCompatActivity() {
         binding.seekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    currentSeekTime = progress
                     controller.seekTo(progress.toLong() * 1000)
                     binding.time.text = getTimeString(progress) + "/" + getTimeString(duration)
                 }
             }
 
             override fun onStartTrackingTouch(startTrackSeek: SeekBar?) {
-                seekStartTime = startTrackSeek!!.progress
+//                seekStartTime = startTrackSeek!!.progress
+                pauseTimer()
             }
 
             override fun onStopTrackingTouch(stopTrackSeek: SeekBar?) {
-                seekEndTime = stopTrackSeek!!.progress
+//                seekEndTime = stopTrackSeek!!.progress
+                resumeTimer()
 
-                totalSeekTime += if (seekEndTime > seekStartTime) {
-                    (seekEndTime - seekStartTime)
-                } else {
-                    (seekStartTime - seekEndTime)
-                }
+
+//                totalSeekTime += if (seekEndTime > seekStartTime) {
+//                    (seekEndTime - seekStartTime)
+//                } else {
+//                    (seekStartTime - seekEndTime)
+//                }
             }
 
         })
@@ -142,10 +147,28 @@ class MediaActivity : AppCompatActivity() {
         controller.play()
     }
 
+
     private fun stopMedia() {
         controller.stop()
         controller.playWhenReady = false
         MediaController.releaseFuture(controllerFuture)
+    }
+
+    private fun startTimer() {
+        isListening = true
+        timerHandler.postDelayed(timerRunnable, 1000)
+    }
+
+    private fun pauseTimer() {
+        if (isListening) {
+            isListening = false
+            pauseCount++
+        }
+    }
+
+    private fun resumeTimer() {
+        isListening = true
+        timerHandler.postDelayed(timerRunnable, 1000)
     }
 
     @OptIn(UnstableApi::class)
@@ -194,6 +217,13 @@ class MediaActivity : AppCompatActivity() {
                 } else {
                     binding.progressBar.hide()
                 }
+
+                if (playbackState == Player.STATE_ENDED){
+                    timerHandler.removeCallbacks(timerRunnable)
+                    val adjustedListeningTime = listeningTime - pauseCount
+                    Toast.makeText(this@MediaActivity, "Listening Time : $adjustedListeningTime", Toast.LENGTH_SHORT).show()
+                    log("Listening Time : $adjustedListeningTime")
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -209,6 +239,19 @@ class MediaActivity : AppCompatActivity() {
 
         binding.progressBar.hide()
         playMedia(mediaUrl)
+
+        timerHandler = Handler(Looper.getMainLooper())
+        timerRunnable = Runnable {
+            if (isListening) {
+                listeningTime++
+                // Update your UI with listeningTime
+                runOnUiThread {
+                    // Update UI elements like TextViews here if needed
+                }
+                timerHandler.postDelayed(timerRunnable, 1000)
+            }
+        }
+        startTimer()
 
         val handler = Handler(Looper.getMainLooper())
         handler.post(object : Runnable {
@@ -249,5 +292,10 @@ class MediaActivity : AppCompatActivity() {
         val mins = seconds / 60
         val secs = seconds % 60
         return String.format("%02d:%02d", mins, secs)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        timerHandler.removeCallbacks(timerRunnable)
     }
 }
