@@ -1,9 +1,18 @@
 package com.example.basicmedia.service
 
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -14,8 +23,6 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 
 class PlaybackService : MediaSessionService(), MediaSession.Callback {
-    // Create your Player and MediaSession in the onCreate lifecycle event
-
     companion object {
         private var playerInstance: Player? = null
         private var mediaSessionInstance: MediaSession? = null
@@ -26,20 +33,92 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     private var currentSongPosition: Long = 0L
     var seekForward = 5000
     var seekBackward = 5000
+    private var isPauseFromLoss = false
 
-    //TODO If entries don't work then use values().map
+    // for audio focus request
+    private var audioManager: AudioManager? = null
+    private var audioFocusState: Int = AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    private var focusRequest: AudioFocusRequest? = null
+    private val attributes = AudioAttributes.Builder().apply {
+        setUsage(AudioAttributes.USAGE_MEDIA)
+        setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+    }.build()
+
     private val notificationPlayerCustomCommandButtons =
         Enums.Companion.NotificationPlayerCustomCommandButton.entries.map { command -> command.commandButton }
 
     override fun onCreate() {
         super.onCreate()
+        audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         initializeSessionAndPlayer()
     }
 
+    @SuppressLint("ObsoleteSdkInt")
+    private fun releaseAudioFocus() {
+        focusRequest?.let {
+            if (Build.VERSION.SDK_INT >= 26)
+                audioManager?.abandonAudioFocusRequest(it)
+            else
+                audioManager?.abandonAudioFocus(focusChangeListener)
+        }
+    }
+
+    @SuppressLint("ObsoleteSdkInt")
+    private fun setupAndRequestAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attributes)
+                .setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener(focusChangeListener)
+                .build()
+            focusRequest?.let {
+                audioFocusState = audioManager?.requestAudioFocus(it) ?: AudioManager.AUDIOFOCUS_REQUEST_FAILED
+            }
+        } else {
+            audioFocusState = audioManager?.requestAudioFocus(
+                focusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) ?: AudioManager.AUDIOFOCUS_REQUEST_FAILED
+        }
+    }
+
+    private val playerListener = @UnstableApi object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            super.onPlayWhenReadyChanged(playWhenReady, reason)
+            if (playWhenReady)
+                setupAndRequestAudioFocus()
+        }
+    }
+
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { state ->
+        audioFocusState = state
+        when (state) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (isPauseFromLoss) {
+                    player.play()
+                    isPauseFromLoss = false
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                if (player.isPlaying) {
+                    player.pause()
+                    isPauseFromLoss = true
+                }
+            }
+
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                if (player.isPlaying){
+                    player.pause()
+                }
+            }
+        }
+    }
 
     private fun initializeSessionAndPlayer() {
         if (playerInstance == null) {
-            playerInstance = ExoPlayer.Builder(this).build()
+            playerInstance = ExoPlayer.Builder(this).build().also { it.addListener(playerListener) }
         }
         player = playerInstance!!
 
@@ -83,6 +162,8 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         if (notificationPlayerCustomCommandButtons.isNotEmpty()) {
             /* Setting custom player command buttons to mediaLibrarySession for player notification. */
             mediaSession?.setCustomLayout(notificationPlayerCustomCommandButtons)
+            if (player.playWhenReady)
+                setupAndRequestAudioFocus()
         }
     }
 
@@ -94,6 +175,10 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     ): ListenableFuture<SessionResult> {
         /* Handling custom command buttons from player notification. */
         currentSongPosition = session.player.currentPosition
+
+        if (player.playWhenReady)
+            setupAndRequestAudioFocus()
+
         if (customCommand.customAction == Enums.Companion.NotificationPlayerCustomCommandButton.REWIND.customAction) {
             if (currentSongPosition - seekBackward >= 0) {
                 session.player.seekTo(currentSongPosition - seekBackward)
@@ -124,6 +209,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             playerInstance = null
             mediaSessionInstance = null
         }
+        releaseAudioFocus()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -134,5 +220,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             }
             stopSelf()
         }
+        releaseAudioFocus()
     }
 }
