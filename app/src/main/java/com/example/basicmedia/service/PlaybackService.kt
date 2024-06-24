@@ -15,6 +15,12 @@ import com.google.common.util.concurrent.ListenableFuture
 
 class PlaybackService : MediaSessionService(), MediaSession.Callback {
     // Create your Player and MediaSession in the onCreate lifecycle event
+
+    companion object {
+        private var playerInstance: Player? = null
+        private var mediaSessionInstance: MediaSession? = null
+    }
+
     private lateinit var player: Player
     private var mediaSession: MediaSession? = null
     private var currentSongPosition: Long = 0L
@@ -30,9 +36,18 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         initializeSessionAndPlayer()
     }
 
+
     private fun initializeSessionAndPlayer() {
-        player = ExoPlayer.Builder(this).build()
-        mediaSession = MediaSession.Builder(this, player).setCallback(this).build()
+        if (playerInstance == null) {
+            playerInstance = ExoPlayer.Builder(this).build()
+        }
+        player = playerInstance!!
+
+        if (mediaSessionInstance == null) {
+            mediaSessionInstance = MediaSession.Builder(this, player).setCallback(this).build()
+        }
+        mediaSession = mediaSessionInstance
+
         mediaSession?.setCustomLayout(notificationPlayerCustomCommandButtons )
     }
 
@@ -106,15 +121,18 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             release()
             player.release()
             mediaSession = null
+            playerInstance = null
+            mediaSessionInstance = null
         }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        val player = mediaSession?.player
-        if (player!!.playWhenReady) {
-            player.pause()
+        mediaSession?.player?.let { player ->
+            if (player.playWhenReady) {
+                player.pause()
+            }
+            stopSelf()
         }
-        stopSelf()
     }
 }

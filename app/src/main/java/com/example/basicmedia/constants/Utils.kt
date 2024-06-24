@@ -12,5 +12,7 @@ class Utils {
         fun View.show() {
             isVisible = true
         }
+
+        const val CURRENT_POSITION = "CURRENT_POSITION"
     }
 }
